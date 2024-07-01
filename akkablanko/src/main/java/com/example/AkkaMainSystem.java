@@ -26,8 +26,8 @@ public class AkkaMainSystem extends AbstractBehavior<AkkaMainSystem.Create> {
     }
 
     private Behavior<Create> onCreate(Create command) {
-        Expression test = Expression.generateExpression(2,3);
-        getContext().getLog().info("Actual result : {}", test.toString());
+        Expression test = Expression.generateExpression(5,3);
+        getContext().getLog().info("Actual result : {}", test);
         ActorRef<PrintAndEvaluator.Message> pae = this.getContext().spawn(PrintAndEvaluator.create(),"pae");
         pae.tell(new PrintAndEvaluator.StartExpression(test));
         return this;

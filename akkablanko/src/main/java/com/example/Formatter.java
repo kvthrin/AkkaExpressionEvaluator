@@ -9,32 +9,34 @@ import akka.actor.typed.javadsl.Receive;
 
 public class Formatter extends AbstractBehavior<Formatter.Message> {
 
-    private ActorRef<PrintAndEvaluator.Message> replyToMain;
-    private ActorRef<Formatter.Message> lastActor;
-
-    private String leftString;
-    private String rightString;
-    private String operator;
+    private ActorRef<PrintAndEvaluator.Message> replyToMain; // Holds reference to printAndEvaluator (pEA)
+    private String leftString; // Saves result for left part of the expression
+    private String rightString; // Saves result for right part of the expression
+    private String operator; // Saves the used operator in the middle
+    private ActorRef<Formatter.Message> parent; // Saves the "creator" actor ref for when creating another actor for subexpressions
+    private boolean leftReceived;
+    private boolean rightReceived;
+    private Boolean parentIsLeft; // Saves position of parent that created child
 
     private Formatter(ActorContext<Message> context) {
         super(context);
     }
 
-
-    public record Init(Expression expression, ActorRef<PrintAndEvaluator.Message> mainActor) implements Message{}
-    public record AddExp(Expression expression, ActorRef<Formatter.Message> last) implements Message{}
-    public record MulExp(Expression expression, ActorRef<Formatter.Message> last) implements Message {}
-    public record SubExp(Expression expression, ActorRef<Formatter.Message> last) implements Message {}
-    public record ValExp(Expression expression, ActorRef<Formatter.Message> last, Boolean left) implements Message {}
-    public record ReceiveResult(String result, Boolean left) implements Message {}
-    public static Behavior<Formatter.Message> create() {
-        return Behaviors.setup(context -> new Formatter(context));
+    public static Behavior<Message> create() {
+        return Behaviors.setup(Formatter::new);
     }
 
     public interface Message {}
 
+    public record Init(Expression expression, ActorRef<PrintAndEvaluator.Message> mainActor) implements Message {}
+    public record AddExp(Expression expression, ActorRef<Formatter.Message> parent, Boolean isParentLeft) implements Message {}
+    public record MulExp(Expression expression, ActorRef<Formatter.Message> parent, Boolean isParentLeft) implements Message {}
+    public record SubExp(Expression expression, ActorRef<Formatter.Message> parent, Boolean isParentLeft) implements Message {}
+    public record ValExp(Expression expression, ActorRef<Formatter.Message> parent, Boolean isLeft, Boolean isParentLeft) implements Message {}
+    public record ReceiveResult(String result, Boolean isLeft, Boolean isParentLeft) implements Message {}
+
     @Override
-    public Receive<Formatter.Message> createReceive() {
+    public Receive<Message> createReceive() {
         return newReceiveBuilder()
                 .onMessage(Init.class, this::onInit)
                 .onMessage(AddExp.class, this::onAddExp)
@@ -45,96 +47,103 @@ public class Formatter extends AbstractBehavior<Formatter.Message> {
                 .build();
     }
 
-
-    private Behavior<Formatter.Message> onAddExp(AddExp msg){
-        operator = "+";
-        lastActor = msg.last;
-        Expression.Add addExp = (Expression.Add) msg.expression;
-        Expression left = addExp.left();
-        Expression right = addExp.right();
-        return this;
-    }
-
-    private Behavior<Formatter.Message> onMulExp(MulExp msg){
-        operator = "*";
-        lastActor = msg.last;
-        Expression.Mul mulExp = (Expression.Mul) msg.expression;
-        Expression left = mulExp.left();
-        Expression right = mulExp.right();
-        return this;
-    }
-
-    private Behavior<Formatter.Message> onSubExp(SubExp msg){
-        operator = "-";
-        lastActor = msg.last;
-        Expression.Sub subExp = (Expression.Sub) msg.expression;
-        Expression left = subExp.left();
-        Expression right = subExp.right();
-        return this;
-    }
-
-    private Behavior<Formatter.Message> onValExp(ValExp msg){
-        String result = String.valueOf(((Expression.Val) msg.expression).inner());
-        lastActor.tell(new ReceiveResult(result, msg.left));
-        return this;
-    }
-
-    private Behavior<Message> onInit(Init msg){
+    private Behavior<Message> onInit(Init msg) {
         replyToMain = msg.mainActor;
+        Expression expr = msg.expression;
 
-        if (msg.expression instanceof Expression.Val) {
-
-        } else if (msg.expression instanceof Expression.Add) {
-            getContext().getSelf().tell(new Formatter.AddExp(msg.expression, getContext().getSelf()));
-        } else if (msg.expression instanceof Expression.Mul) {
-            getContext().getSelf().tell(new Formatter.MulExp(msg.expression, getContext().getSelf()));
-        } else if (msg.expression instanceof Expression.Sub) {
-            getContext().getSelf().tell(new Formatter.SubExp(msg.expression, getContext().getSelf()));
-        }
-
-        return this;
-    }
-
-    private Behavior <Message> onReceiveResult(ReceiveResult msg){
-
-        if (msg.left) {
-            leftString = msg.result;
+        //Checks for most outer type of expression
+        if (expr instanceof Expression.Val) {
+            String result = String.valueOf(((Expression.Val) expr).inner());
+            replyToMain.tell(new PrintAndEvaluator.FormattedResult(result)); // If its only one val, it's immediately returned to pEA
         } else {
-            rightString = msg.result;
+            ActorRef<Formatter.Message> self = getContext().getSelf();
+            if (expr instanceof Expression.Add) {
+                self.tell(new AddExp(expr, self, null)); // Sends the expression, itself as the parent and null, since it's not a subexpression
+            } else if (expr instanceof Expression.Mul) {
+                self.tell(new MulExp(expr, self, null));
+            } else if (expr instanceof Expression.Sub) {
+                self.tell(new SubExp(expr, self, null));
+            }
         }
-
-        if (leftString != null && rightString != null) {
-            String result = leftString + " " + operator + " " + rightString;
-            getContext().getLog().info("result: {}", result);
-        }
-
         return this;
-
     }
 
+    private Behavior<Message> onAddExp(AddExp msg) {
+        operator = "+";
+        parent = msg.parent;
+        parentIsLeft = msg.isParentLeft; // Saving position of parent
+        processSubExpressions(((Expression.Add) msg.expression).left(), ((Expression.Add) msg.expression).right());
+        return this;
+    }
 
-    private void processSubExpression(Expression left, Expression right, String operator){
+    private Behavior<Message> onMulExp(MulExp msg) {
+        operator = "*";
+        parent = msg.parent;
+        parentIsLeft = msg.isParentLeft;
+        processSubExpressions(((Expression.Mul) msg.expression).left(), ((Expression.Mul) msg.expression).right());
+        return this;
+    }
+
+    private Behavior<Message> onSubExp(SubExp msg) {
+        operator = "-";
+        parent = msg.parent;
+        parentIsLeft = msg.isParentLeft;
+        processSubExpressions(((Expression.Sub) msg.expression).left(), ((Expression.Sub) msg.expression).right());
+        return this;
+    }
+
+    private Behavior<Message> onValExp(ValExp msg) {
+        String result = String.valueOf(((Expression.Val) msg.expression).inner());
+        msg.parent.tell(new ReceiveResult(result, msg.isLeft, msg.isParentLeft));
+        return this;
+    }
+
+    private Behavior<Message> onReceiveResult(ReceiveResult msg) {
+        if (Boolean.TRUE.equals(msg.isLeft)) { // Safeguard against null, checks whether result is left or right child
+            leftString = msg.result;
+            leftReceived = true;
+            getContext().getLog().info("Left result received: {}", leftString);
+        } else if (Boolean.FALSE.equals(msg.isLeft)){
+            rightString = msg.result;
+            rightReceived = true;
+            getContext().getLog().info("Right result received: {}", rightString);
+        }
+
+        if (leftReceived && rightReceived) { // If both are true, subexpression is finished
+            String combinedResult = "(" + leftString +  operator + rightString + ")";
+            getContext().getLog().info("Combined result: {}", combinedResult);
+            if (parentIsLeft != null) { // If parent is null, the current actor is the original formattor
+                parent.tell(new ReceiveResult(combinedResult, parentIsLeft, null)); // Send combined result back to parent with the correct position of the parent
+            } else {
+                getContext().getLog().info("Sending result to pea");
+                replyToMain.tell(new PrintAndEvaluator.FormattedResult(combinedResult));
+            }
+        }
+        return this;
+    }
+
+    private void processSubExpressions(Expression left, Expression right) {
         ActorRef<Message> leftChild = getContext().spawnAnonymous(Formatter.create());
         ActorRef<Message> rightChild = getContext().spawnAnonymous(Formatter.create());
 
         if (left instanceof Expression.Val) {
-            leftChild.tell(new Formatter.ValExp(left, getContext().getSelf(), true));
+            leftChild.tell(new ValExp(left, getContext().getSelf(), true, true)); // Include parentIsLeft
         } else if (left instanceof Expression.Add) {
-            leftChild.tell(new Formatter.AddExp(left, getContext().getSelf()));
+            leftChild.tell(new AddExp(left, getContext().getSelf(), true)); // Include parentIsLeft
         } else if (left instanceof Expression.Mul) {
-            leftChild.tell(new Formatter.MulExp(left, getContext().getSelf()));
+            leftChild.tell(new MulExp(left, getContext().getSelf(), true)); // Include parentIsLeft
         } else if (left instanceof Expression.Sub) {
-            leftChild.tell(new Formatter.SubExp(left, getContext().getSelf()));
+            leftChild.tell(new SubExp(left, getContext().getSelf(), true)); // Include parentIsLeft
         }
 
         if (right instanceof Expression.Val) {
-            rightChild.tell(new Formatter.ValExp(left, getContext().getSelf(), false));
-        } else if (left instanceof Expression.Add) {
-            rightChild.tell(new Formatter.AddExp(left, getContext().getSelf()));
-        } else if (left instanceof Expression.Mul) {
-            rightChild.tell(new Formatter.MulExp(left, getContext().getSelf()));
-        } else if (left instanceof Expression.Sub) {
-            rightChild.tell(new Formatter.SubExp(left, getContext().getSelf()));
+            rightChild.tell(new ValExp(right, getContext().getSelf(), false, false)); // Include parentIsLeft
+        } else if (right instanceof Expression.Add) {
+            rightChild.tell(new AddExp(right, getContext().getSelf(), false)); // Include parentIsLeft
+        } else if (right instanceof Expression.Mul) {
+            rightChild.tell(new MulExp(right, getContext().getSelf(), false)); // Include parentIsLeft
+        } else if (right instanceof Expression.Sub) {
+            rightChild.tell(new SubExp(right, getContext().getSelf(), false)); // Include parentIsLeft
         }
     }
 }

@@ -13,9 +13,10 @@ public class PrintAndEvaluator extends AbstractBehavior<PrintAndEvaluator.Messag
         super(context);
     }
 
-    public interface Message{}
+    public interface Message {}
 
     public record StartExpression(Expression expression) implements Message {}
+    public record FormattedResult(String result) implements Message {}
 
     public static Behavior<Message> create() {
         return Behaviors.setup(PrintAndEvaluator::new);
@@ -25,12 +26,18 @@ public class PrintAndEvaluator extends AbstractBehavior<PrintAndEvaluator.Messag
     public Receive<PrintAndEvaluator.Message> createReceive() {
         return newReceiveBuilder()
                 .onMessage(StartExpression.class, this::onStartExpression)
+                .onMessage(FormattedResult.class, this::onFormattedResult)
                 .build();
     }
 
     private Behavior<Message> onStartExpression(StartExpression startExpression) {
-        ActorRef<Formatter.Message> formatter = this.getContext().spawn(Formatter.create(),"formatter");
+        ActorRef<Formatter.Message> formatter = this.getContext().spawn(Formatter.create(), "formatter");
         formatter.tell(new Formatter.Init(startExpression.expression, getContext().getSelf()));
+        return this;
+    }
+
+    private Behavior<Message> onFormattedResult(FormattedResult formattedResult) {
+        getContext().getLog().info("Formatted Expression: {}", formattedResult.result);
         return this;
     }
     }
