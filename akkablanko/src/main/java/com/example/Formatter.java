@@ -127,23 +127,23 @@ public class Formatter extends AbstractBehavior<Formatter.Message> {
         ActorRef<Message> rightChild = getContext().spawnAnonymous(Formatter.create());
 
         if (left instanceof Expression.Val) {
-            leftChild.tell(new ValExp(left, getContext().getSelf(), true, true)); // Include parentIsLeft
+            leftChild.tell(new ValExp(left, getContext().getSelf(), true, true));
         } else if (left instanceof Expression.Add) {
-            leftChild.tell(new AddExp(left, getContext().getSelf(), true)); // Include parentIsLeft
+            leftChild.tell(new AddExp(left, getContext().getSelf(), true));
         } else if (left instanceof Expression.Mul) {
-            leftChild.tell(new MulExp(left, getContext().getSelf(), true)); // Include parentIsLeft
+            leftChild.tell(new MulExp(left, getContext().getSelf(), true));
         } else if (left instanceof Expression.Sub) {
-            leftChild.tell(new SubExp(left, getContext().getSelf(), true)); // Include parentIsLeft
+            leftChild.tell(new SubExp(left, getContext().getSelf(), true));
         }
 
         if (right instanceof Expression.Val) {
-            rightChild.tell(new ValExp(right, getContext().getSelf(), false, false)); // Include parentIsLeft
+            rightChild.tell(new ValExp(right, getContext().getSelf(), false, false));
         } else if (right instanceof Expression.Add) {
-            rightChild.tell(new AddExp(right, getContext().getSelf(), false)); // Include parentIsLeft
+            rightChild.tell(new AddExp(right, getContext().getSelf(), false));
         } else if (right instanceof Expression.Mul) {
-            rightChild.tell(new MulExp(right, getContext().getSelf(), false)); // Include parentIsLeft
+            rightChild.tell(new MulExp(right, getContext().getSelf(), false));
         } else if (right instanceof Expression.Sub) {
-            rightChild.tell(new SubExp(right, getContext().getSelf(), false)); // Include parentIsLeft
+            rightChild.tell(new SubExp(right, getContext().getSelf(), false));
         }
     }
 }
