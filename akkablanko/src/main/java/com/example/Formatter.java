@@ -112,7 +112,7 @@ public class Formatter extends AbstractBehavior<Formatter.Message> {
         if (leftReceived && rightReceived) { // If both are true, subexpression is finished
             String combinedResult = "(" + leftString +  operator + rightString + ")";
             getContext().getLog().info("Combined result: {}", combinedResult);
-            if (parentIsLeft != null) { // If parent is null, the current actor is the original formattor
+            if (parentIsLeft != null) { // If parent is null, the current actor is the original formatter
                 parent.tell(new ReceiveResult(combinedResult, parentIsLeft, null)); // Send combined result back to parent with the correct position of the parent
             } else {
                 getContext().getLog().info("Sending result to pea");
